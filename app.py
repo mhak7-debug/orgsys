@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """نظام إداري متكامل لمؤسسة صغيرة (~20 موظفاً)
 موظفون + حضور + رواتب + مخزون + محاسبة مبسطة + طلبات إدارية بسلاسل موافقة.
-Flask + SQLite، بلا اعتمادات ثقيلة.
+Flask + SQLite محلياً، أو Postgres (Neon) تلقائياً عند وجود DATABASE_URL (مثل Vercel).
 """
 import base64
 import csv
+import functools
 import hashlib
 import io
 import json
@@ -20,12 +21,17 @@ from functools import wraps
 
 from arabic_pdf import build_sealed_pdf, data_url_to_png
 from flask import (Flask, abort, flash, g, redirect, render_template, request,
-                   send_file, send_from_directory, session, url_for)
+                   send_file, session, url_for)
 from PIL import Image
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.environ.get("ORG_DATA_DIR", os.path.join(BASE, "data"))
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
+USE_PG = DATABASE_URL.startswith(("postgres://", "postgresql://"))
+ON_VERCEL = bool(os.environ.get("VERCEL"))
+# نظام ملفات Vercel للقراءة فقط (عدا /tmp)، لذلك تُحفظ البيانات والملفات في Postgres هناك
+DATA = os.environ.get("ORG_DATA_DIR") or (
+    os.path.join(tempfile.gettempdir(), "orgsys") if USE_PG else os.path.join(BASE, "data"))
 UPLOADS = os.path.join(DATA, "uploads")
 SEALED = os.path.join(DATA, "sealed")
 DB_PATH = os.path.join(DATA, "org.db")
@@ -33,8 +39,11 @@ os.makedirs(UPLOADS, exist_ok=True)
 os.makedirs(SEALED, exist_ok=True)
 ORG_NAME = os.environ.get("ORG_NAME", "المؤسسة")
 
+if USE_PG:
+    import psycopg
 
-def _secret():
+
+def _file_secret():
     p = os.path.join(DATA, "secret.key")
     if not os.path.exists(p):
         with open(p, "w") as f:
@@ -49,11 +58,11 @@ def _secret():
 
 app = Flask(__name__)
 app.config.update(
-    SECRET_KEY=_secret(),
-    MAX_CONTENT_LENGTH=5 * 1024 * 1024,
+    # حدّ Vercel لجسم الطلب 4.5MB
+    MAX_CONTENT_LENGTH=(4 if ON_VERCEL else 5) * 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.environ.get("HTTPS", "") == "1",
+    SESSION_COOKIE_SECURE=ON_VERCEL or os.environ.get("HTTPS", "") == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
 )
 
@@ -127,12 +136,107 @@ CREATE TABLE IF NOT EXISTS audit(
 """
 
 
+EXTRA_SCHEMA = """
+CREATE TABLE IF NOT EXISTS files(
+ id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, data BLOB NOT NULL, created_at TEXT);
+CREATE TABLE IF NOT EXISTS settings(
+ id INTEGER PRIMARY KEY, k TEXT UNIQUE NOT NULL, v TEXT);
+"""
+
+
 # ----------------------------------------------------------------- قاعدة البيانات
+class Row:
+    """صف يدعم r["col"] و r[0] و dict(r) مثل sqlite3.Row."""
+    __slots__ = ("_cols", "_vals")
+
+    def __init__(self, cols, vals):
+        self._cols, self._vals = cols, vals
+
+    def __getitem__(self, k):
+        if isinstance(k, (int, slice)):
+            return self._vals[k]
+        try:
+            return self._vals[self._cols[k]]
+        except KeyError:
+            raise IndexError(k) from None
+
+    def keys(self):
+        return list(self._cols)
+
+    def __iter__(self):
+        return iter(self._vals)
+
+    def __len__(self):
+        return len(self._vals)
+
+
+class _PGCursor:
+    def __init__(self, cur, returning_id):
+        self._cur = cur
+        self._cols = {c.name: i for i, c in enumerate(cur.description)} if cur.description else {}
+        self.lastrowid = None
+        self._buffer = None
+        if returning_id:
+            r = cur.fetchone()
+            self.lastrowid = r[0] if r else None
+            self._buffer = []
+
+    def fetchall(self):
+        if self._buffer is not None:
+            return self._buffer
+        return [Row(self._cols, r) for r in self._cur.fetchall()] if self._cols else []
+
+    def fetchone(self):
+        rows = self.fetchall()
+        return rows[0] if rows else None
+
+
+@functools.lru_cache(maxsize=512)
+def _pg_sql(sql):
+    """يحوّل صياغة SQLite (?) إلى صياغة psycopg (%s)."""
+    out = sql.replace("%", "%%").replace("?", "%s")
+    head = out.lstrip().upper()
+    returning = head.startswith("INSERT") and "RETURNING" not in head
+    if returning:
+        out = out.rstrip().rstrip(";") + " RETURNING id"
+    return out, returning
+
+
+class PGConn:
+    def __init__(self):
+        self._c = psycopg.connect(DATABASE_URL, prepare_threshold=None, connect_timeout=15)
+        schema = os.environ.get("PG_SCHEMA")  # للاختبارات فقط
+        if schema:
+            self._c.execute(f'SET search_path TO "{schema}"')
+
+    def execute(self, sql, args=()):
+        pg, returning = _pg_sql(sql)
+        cur = self._c.cursor()
+        cur.execute(pg, tuple(args))
+        return _PGCursor(cur, returning)
+
+    def commit(self):
+        self._c.commit()
+
+    def rollback(self):
+        self._c.rollback()
+
+    def close(self):
+        self._c.close()
+
+
+def connect():
+    if USE_PG:
+        return PGConn()
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys=ON")
+    return con
+
+
 def db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys=ON")
+        g.db = connect()
     return g.db
 
 
@@ -166,6 +270,50 @@ def log(action):
        (u["id"] if u else None, action, now()))
 
 
+# ----------------------------------------------------------------- تخزين الملفات
+# محلياً: مجلد data/ ، وعلى Postgres: جدول files (لا كتابة على القرص)
+def put_file(name, data):
+    if USE_PG:
+        ex("""INSERT INTO files(name,data,created_at) VALUES(?,?,?)
+              ON CONFLICT(name) DO UPDATE SET data=excluded.data, created_at=excluded.created_at""",
+           (name, data, now()))
+        return
+    path = os.path.join(DATA, name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def get_file(name):
+    if USE_PG:
+        r = q("SELECT data FROM files WHERE name=?", (name,), one=True)
+        return bytes(r["data"]) if r else None
+    path = os.path.join(DATA, name)
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def has_file(name):
+    if USE_PG:
+        return q("SELECT 1 FROM files WHERE name=?", (name,), one=True) is not None
+    return os.path.isfile(os.path.join(DATA, name))
+
+
+def stamp_path():
+    """مسار صورة الختم المخصّصة (stamp.png) إن وُجدت."""
+    if not USE_PG:
+        return os.path.join(DATA, "stamp.png")
+    data = get_file("stamp.png")
+    if not data:
+        return None
+    path = os.path.join(DATA, "stamp.png")
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
 MIGRATIONS = [("users", "signature", "TEXT"), ("requests", "category", "TEXT"), ("requests", "paid_amount", "REAL"),
               ("requests", "paid_account", "TEXT"), ("requests", "paid_ref", "TEXT"), ("requests", "paid_date", "TEXT"),
               ("requests", "paid_by", "INTEGER"), ("requests", "seal_code", "TEXT"), ("requests", "seal_hash", "TEXT"),
@@ -176,12 +324,26 @@ MIGRATIONS = [("users", "signature", "TEXT"), ("requests", "category", "TEXT"), 
               ("request_steps", "on_behalf", "INTEGER DEFAULT 0")]
 
 
+def _pg_ddl(sql):
+    sql = sql.replace("INTEGER PRIMARY KEY", "SERIAL PRIMARY KEY")
+    sql = re.sub(r"\bREAL\b", "DOUBLE PRECISION", sql)
+    return re.sub(r"\bBLOB\b", "BYTEA", sql)
+
+
 def init_db():
-    con = sqlite3.connect(DB_PATH)
-    con.executescript(SCHEMA)
-    for t, c, ddl in MIGRATIONS:  # ترقية قواعد بيانات الإصدار السابق
-        if c not in [r[1] for r in con.execute(f"PRAGMA table_info({t})")]:
-            con.execute(f"ALTER TABLE {t} ADD COLUMN {c} {ddl}")
+    con = connect()
+    if USE_PG:
+        con.execute("SELECT pg_advisory_xact_lock(724501)")  # يمنع تعارض التشغيل المتزامن
+        for stmt in _pg_ddl(SCHEMA + EXTRA_SCHEMA).split(";"):
+            if stmt.strip():
+                con.execute(stmt)
+        for t, c, ddl in MIGRATIONS:
+            con.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS {c} {_pg_ddl(ddl)}")
+    else:
+        con.executescript(SCHEMA + EXTRA_SCHEMA)
+        for t, c, ddl in MIGRATIONS:  # ترقية قواعد بيانات الإصدار السابق
+            if c not in [r[1] for r in con.execute(f"PRAGMA table_info({t})")]:
+                con.execute(f"ALTER TABLE {t} ADD COLUMN {c} {ddl}")
     if con.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
         pw = os.environ.get("ADMIN_PASSWORD") or secrets.token_urlsafe(9)
         con.execute("INSERT INTO users(username,password_hash,full_name,role) VALUES(?,?,?,?)",
@@ -378,7 +540,7 @@ def users():
         pw = f.get("password", "")
         role = f.get("role")
         if not re.fullmatch(r"[a-z0-9_.]{3,30}", un):
-            flash("اسم المستخدم: حروف إنجليزية صغيرة وأرقام (3-30).", "error")
+            flash("اسم المستخدم: حروف إنجلي��ية صغيرة وأرقام (3-30).", "error")
         elif len(pw) < 8:
             flash("كلمة المرور 8 أحرف على الأقل.", "error")
         elif role not in ROLES or not f.get("full_name", "").strip():
@@ -947,7 +1109,7 @@ def request_new():
             flash(err, "error")
         else:
             if att:
-                file.save(os.path.join(UPLOADS, att))
+                put_file("uploads/" + att, file.read())
             steps = build_steps(typ, u)
             d = db()
             rid = d.execute("""INSERT INTO requests(type,category,requester_id,title,details,amount,date_from,date_to,days,item_id,qty,attachment,attachment_name,created_at)
@@ -987,7 +1149,7 @@ def request_view(rid):
     return render_template("request_view.html", r=r, steps=steps_of(rid), item=item, can_act=acting,
                            is_owner=r["requester_id"] == u["id"], paid_by=paid_by,
                            chain_ok=verify_chain(rid), needs_sig=acting and not u["signature"],
-                           sealed_ok=bool(r["seal_code"]) and os.path.exists(os.path.join(SEALED, f"{rid}.pdf")))
+                           sealed_ok=bool(r["seal_code"]) and has_file(f"sealed/{rid}.pdf"))
 
 
 @app.route("/requests/<int:rid>/print")
@@ -1002,20 +1164,23 @@ def request_print(rid):
 @login_required()
 def request_file(rid):
     r = get_request(rid)
-    if not r["attachment"]:
+    if not r["attachment"] or "/" in r["attachment"] or "\\" in r["attachment"]:
         abort(404)
-    return send_from_directory(UPLOADS, r["attachment"], as_attachment=True,
-                               download_name=r["attachment_name"] or r["attachment"])
+    data = get_file("uploads/" + r["attachment"])
+    if data is None:
+        abort(404)
+    return send_file(io.BytesIO(data), as_attachment=True,
+                     download_name=r["attachment_name"] or r["attachment"])
 
 
 @app.route("/requests/<int:rid>/sealed")
 @login_required()
 def request_sealed(rid):
     r = get_request(rid)
-    path = os.path.join(SEALED, f"{rid}.pdf")
-    if not r["seal_code"] or not os.path.exists(path):
+    data = get_file(f"sealed/{rid}.pdf") if r["seal_code"] else None
+    if data is None:
         abort(404)
-    return send_file(path, mimetype="application/pdf", as_attachment=True,
+    return send_file(io.BytesIO(data), mimetype="application/pdf", as_attachment=True,
                      download_name=f"request-{rid}-sealed.pdf")
 
 
@@ -1025,7 +1190,7 @@ def request_reseal(rid):
     u, r = current_user(), get_request(rid)
     if not has_role(u, "admin") or r["status"] != "approved":
         abort(403)
-    if os.path.exists(os.path.join(SEALED, f"{rid}.pdf")) and r["seal_code"]:
+    if r["seal_code"] and has_file(f"sealed/{rid}.pdf"):
         flash("الملف المختوم موجود مسبقاً.", "error")
     else:
         try:
@@ -1058,7 +1223,7 @@ def finalize_check(r):
         if not e or e["b"] < r["days"]:
             return "رصيد إجازات الموظف لا يكفي الآن."
     if r["type"] == "material" and r["item_id"] and r["qty"] > stock(r["item_id"]):
-        return "الرصيد المتاح في المخزن أقل من الكمية المطلوبة."
+        return "الرصيد المتا�� في المخزن أقل من الكمية المطلوبة."
     return None
 
 
@@ -1116,11 +1281,17 @@ def seal_request(rid):
     signers = [dict(title=f"{ROLES[s['role']]} - {STEP_KINDS[s['kind'] or 'approve']}", name=s["actor_name"] or "",
                     when=s["acted_at"], note=s["note"] or "", signature=data_url_to_png(s["sig"]),
                     on_behalf=bool(s["on_behalf"]), hash=s["chain_hash"] or "") for s in steps]
-    path = os.path.join(SEALED, f"{rid}.pdf")
-    build_sealed_pdf(path, ORG_NAME, f"{label} رقم {rid}", code, verify_url, rows, paid_rows, signers,
-                     seal_hash, stamp_time, os.path.join(DATA, "stamp.png"))
-    with open(path, "rb") as fh:
-        pdf_hash = hashlib.sha256(fh.read()).hexdigest()
+    fd, path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        build_sealed_pdf(path, ORG_NAME, f"{label} رقم {rid}", code, verify_url, rows, paid_rows, signers,
+                         seal_hash, stamp_time, stamp_path())
+        with open(path, "rb") as fh:
+            pdf = fh.read()
+    finally:
+        os.remove(path)
+    pdf_hash = hashlib.sha256(pdf).hexdigest()
+    put_file(f"sealed/{rid}.pdf", pdf)
     ex("UPDATE requests SET seal_code=?, seal_hash=?, sealed_at=?, sealed_pdf_hash=? WHERE id=?",
        (code, seal_hash, stamp_time, pdf_hash, rid))
     return code
@@ -1251,6 +1422,15 @@ def audit():
 def backup():
     if not has_role(current_user(), "admin"):
         abort(403)
+    if USE_PG:
+        tables = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA)
+        dump = {t: [dict(zip(r.keys(), r)) for r in q(f"SELECT * FROM {t} ORDER BY id")] for t in tables}
+        dump["files"] = [dict(name=r["name"], created_at=r["created_at"])
+                         for r in q("SELECT name, created_at FROM files ORDER BY id")]
+        data = io.BytesIO(json.dumps(dump, ensure_ascii=False, default=str, indent=1).encode("utf-8"))
+        log("نسخة احتياطية")
+        return send_file(data, mimetype="application/json", as_attachment=True,
+                         download_name=f"backup-{date.today().isoformat()}.json")
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     dst = sqlite3.connect(path)
@@ -1263,7 +1443,18 @@ def backup():
     return send_file(data, as_attachment=True, download_name=f"backup-{date.today().isoformat()}.db")
 
 
+def _db_secret():
+    con = connect()
+    con.execute("INSERT INTO settings(k,v) VALUES(?,?) ON CONFLICT(k) DO NOTHING",
+                ("secret_key", secrets.token_hex(32)))
+    con.commit()
+    v = con.execute("SELECT v FROM settings WHERE k=?", ("secret_key",)).fetchone()["v"]
+    con.close()
+    return v
+
+
 init_db()
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or (_db_secret() if USE_PG else _file_secret())
 
 if __name__ == "__main__":
     app.run(host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", 8000)))

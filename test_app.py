@@ -1,5 +1,8 @@
 import base64, hashlib, io, os, sys, tempfile
 os.environ["ORG_DATA_DIR"] = tempfile.mkdtemp()
+if not os.environ.get("PG_SCHEMA"):  # الافتراضي: SQLite مؤقتة. لاختبار Postgres عيّن PG_SCHEMA و DATABASE_URL
+    os.environ.pop("DATABASE_URL", None)
+    os.environ.pop("POSTGRES_URL", None)
 os.environ["ADMIN_PASSWORD"] = "AdminPass123"
 os.environ["ORG_NAME"] = "مؤسسة النور"
 import app as A
@@ -103,9 +106,10 @@ ok("اعتماد" in adm.get(f"/requests/{r3}").get_data(as_text=True), "صفح�
 post(adm, f"/requests/{r3}/act", action="approve", note="اعتماد نهائي")
 rq = Q("SELECT * FROM requests WHERE id=?", (r3,), one=True)
 ok(rq["status"] == "approved" and rq["seal_code"] and len(rq["seal_hash"]) == 64, "اعتماد الإدارة + رمز الختم")
-pdf = os.path.join(A.SEALED, f"{r3}.pdf")
-ok(os.path.exists(pdf) and open(pdf, "rb").read(5) == b"%PDF-", "توليد ملف PDF مختوم")
-ok(len(PdfReader(pdf).pages) >= 1 and hashlib.sha256(open(pdf, "rb").read()).hexdigest() == rq["sealed_pdf_hash"], "PDF صالح وبصمته مسجلة")
+with A.app.app_context():
+    pdf_bytes = A.get_file(f"sealed/{r3}.pdf") or b""
+ok(pdf_bytes[:5] == b"%PDF-", "توليد ملف PDF مختوم")
+ok(len(PdfReader(io.BytesIO(pdf_bytes)).pages) >= 1 and hashlib.sha256(pdf_bytes).hexdigest() == rq["sealed_pdf_hash"], "PDF صالح وبصمته مسجلة")
 sig_rows = Q("SELECT * FROM request_steps WHERE request_id=? ORDER BY step_no", (r3,))
 ok(all(s["sig"] and s["chain_hash"] and s["actor_name"] for s in sig_rows) and len({s["chain_hash"] for s in sig_rows}) == 3, "كل توقيع محفوظ ببصمة متسلسلة")
 ok(emp.get(f"/requests/{r3}/sealed").status_code == 200 and acc.get(f"/requests/{r3}/sealed").status_code == 200, "تنزيل الملف المختوم لأطراف الطلب")
@@ -115,7 +119,7 @@ pub = A.app.test_client()
 code = rq["seal_code"]; vr = pub.get(f"/verify?code={code}").get_data(as_text=True)
 ok("ملف مختوم صحيح" in vr and "480.00" in vr, "صفحة التحقق العامة (بلا دخول)")
 with pub.session_transaction() as s: s["csrf"] = "t"
-good = pub.post("/verify", data={"csrf": "t", "code": code, "file": (io.BytesIO(open(pdf, "rb").read()), "a.pdf")}, content_type="multipart/form-data").get_data(as_text=True)
+good = pub.post("/verify", data={"csrf": "t", "code": code, "file": (io.BytesIO(pdf_bytes), "a.pdf")}, content_type="multipart/form-data").get_data(as_text=True)
 bad = pub.post("/verify", data={"csrf": "t", "code": code, "file": (io.BytesIO(b"%PDF-fake"), "a.pdf")}, content_type="multipart/form-data").get_data(as_text=True)
 ok("مطابق للأصل" in good and "لا يطابق" in bad, "فحص بصمة ملف PDF: الأصلي مقبول والمعدّل مرفوض")
 ok("لا يوجد ملف" in pub.get("/verify?code=ZZZZ-ZZZZ-ZZZZ").get_data(as_text=True), "رمز ختم غير موجود")
@@ -175,6 +179,7 @@ for p in ["/", "/requests", "/requests?scope=all&status=approved", "/employees",
     ok(adm.get(p).status_code == 200, "GET " + p)
 for c, n in ((emp, "emp"), (mgr, "mgr"), (hr, "hr"), (acc, "acc"), (store, "store")):
     ok(c.get("/").status_code == 200 and c.get("/requests").status_code == 200, "الصفحات الرئيسية لـ " + n)
-r = adm.post("/backup", data={"csrf": "t"}); ok(r.status_code == 200 and r.data[:6] == b"SQLite", "نسخة احتياطية صالحة")
+r = adm.post("/backup", data={"csrf": "t"})
+ok(r.status_code == 200 and (b'"users"' in r.data if A.USE_PG else r.data[:6] == b"SQLite"), "نسخة احتياطية صالحة")
 ok(adm.post("/users/1/toggle", data={"csrf": "t"}).status_code == 403, "المدير لا يعطل نفسه")
 print("\nالفاشلة:", ok.failed); sys.exit(1 if ok.failed else 0)
