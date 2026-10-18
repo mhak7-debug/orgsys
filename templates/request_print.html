@@ -1,0 +1,18 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>طلب #{{ r.id }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body>
+<div class="public"><div class="card">
+<h1 style="justify-content:center">{{ org }}</h1><h2 style="text-align:center">{{ TYPES[r.type].label }} — رقم {{ r.id }}</h2>
+<table>
+<tr><th style="width:150px">مقدم الطلب</th><td>{{ r.requester }}</td><th>التاريخ</th><td>{{ r.created_at }}</td></tr>
+<tr><th>العنوان</th><td colspan="3">{{ r.title }}</td></tr>
+{% if r.category %}<tr><th>التصنيف</th><td colspan="3">{{ r.category }}</td></tr>{% endif %}
+{% if r.amount %}<tr><th>المبلغ</th><td colspan="3">{{ r.amount|money }}</td></tr>{% endif %}
+{% if r.paid_amount %}<tr><th>المصروف</th><td colspan="3">{{ r.paid_amount|money }} — {{ r.paid_account }} — {{ r.paid_date }} — مرجع: {{ r.paid_ref or '-' }}</td></tr>{% endif %}
+{% if r.date_from %}<tr><th>الفترة</th><td colspan="3">{{ r.date_from }}{% if r.date_to %} ← {{ r.date_to }} ({{ '%g'|format(r.days) }} يوم){% endif %}</td></tr>{% endif %}
+{% if item %}<tr><th>الصنف</th><td colspan="3">{{ item.name }} × {{ '%g'|format(r.qty) }}</td></tr>{% endif %}
+<tr><th>التفاصيل</th><td colspan="3" style="white-space:pre-wrap">{{ r.details }}</td></tr>
+<tr><th>الحالة</th><td colspan="3">{{ req_status(r)[0] }}{% if r.seal_code %} — رمز الختم {{ r.seal_code }}{% endif %}</td></tr></table>
+<h2>الموافقات والتوقيعات</h2><table><tr><th>الجهة</th><th>الإجراء</th><th>القرار</th><th>الاسم</th><th>الوقت</th><th>التوقيع</th></tr>
+{% for s in steps %}<tr><td>{{ ROLES[s.role] }}</td><td>{{ STEP_KINDS[s.kind or 'approve'] }}</td><td>{{ STATUS.get(s.status, s.status) }}{% if s.note %}<br><span class="muted">{{ s.note }}</span>{% endif %}</td><td>{{ s.actor_name or s.actor or '' }}</td><td>{{ s.acted_at or '' }}</td>
+<td style="height:56px">{% if s.sig %}<img class="sig-thumb" src="{{ s.sig }}" alt="">{% endif %}</td></tr>{% endfor %}</table>
+<p class="noprint muted">للطباعة: Ctrl+P</p></div></div></body></html>

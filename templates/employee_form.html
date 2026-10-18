@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}
+<h1>{{ 'تعديل موظف' if e else 'موظف جديد' }}</h1>
+<div class="card"><form method="post" class="row"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div><label>الاسم</label><input name="name" value="{{ e.name if e }}" required></div>
+<div><label>الوظيفة</label><input name="job_title" value="{{ e.job_title or '' if e }}"></div>
+<div><label>القسم</label><input name="department" value="{{ e.department or '' if e }}"></div>
+<div><label>الهاتف</label><input name="phone" value="{{ e.phone or '' if e }}"></div>
+<div><label>تاريخ التعيين</label><input type="date" name="hire_date" value="{{ e.hire_date or '' if e }}"></div>
+<div><label>الراتب الأساسي</label><input name="salary" type="number" step="0.01" min="0" value="{{ e.salary if e else 0 }}"></div>
+<div><label>رصيد الإجازات (يوم)</label><input name="leave_balance" type="number" step="0.5" min="0" value="{{ e.leave_balance if e else 21 }}"></div>
+<div><label>الحالة</label><select name="status"><option value="active">نشط</option><option value="inactive" {{ 'selected' if e and e.status=='inactive' }}>غير نشط</option></select></div>
+<div style="align-self:end"><button>حفظ</button> <a href="{{ url_for('employees') }}">إلغاء</a></div></form></div>{% endblock %}

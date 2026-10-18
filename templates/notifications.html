@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block body %}
+<h1>الإشعارات</h1>
+<div class="card">{% for n in rows %}<div class="tl-item"><div class="tl-ic">{{ '●' if not n.read else '○' }}</div><div style="flex:1">
+<a href="{{ n.url }}" style="{{ 'font-weight:700' if not n.read }}">{{ n.text }}</a><div class="muted">{{ n.created_at }}</div></div></div>
+{% else %}<p class="muted">لا توجد إشعارات.</p>{% endfor %}</div>{% endblock %}

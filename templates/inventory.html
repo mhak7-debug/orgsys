@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block body %}
+<h1>المخزون <a class="btn gray" href="{{ url_for('inventory_moves') }}">سجل الحركات</a></h1>
+{% if can_edit %}<div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="card"><h2 style="margin-top:0">صنف جديد</h2><form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input name="name" placeholder="اسم الصنف" required><input name="unit" placeholder="الوحدة (علبة، قطعة)"><input name="min_qty" type="number" step="0.01" min="0" placeholder="الحد الأدنى"><button>إضافة</button></form></div>
+<div class="card"><h2 style="margin-top:0">حركة مخزون</h2><form method="post" action="{{ url_for('inventory_move') }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<select name="item_id" required>{% for i in rows %}<option value="{{ i.id }}">{{ i.name }}</option>{% endfor %}</select>
+<select name="kind"><option value="in">إدخال</option><option value="out">إخراج</option></select>
+<input name="qty" type="number" step="0.01" min="0.01" placeholder="الكمية" required><input name="note" placeholder="ملاحظة"><button>تسجيل</button></form></div></div>{% endif %}
+<div class="scroll"><table><tr><th>الصنف</th><th>الوحدة</th><th>الرصيد</th><th>الحد الأدنى</th><th>الحالة</th></tr>
+{% for i in rows %}<tr><td>{{ i.name }}</td><td>{{ i.unit }}</td><td>{{ '%g'|format(i.qty) }}</td><td>{{ '%g'|format(i.min_qty) }}</td>
+<td>{% if i.qty <= i.min_qty %}<span class="low">يحتاج تعبئة</span>{% else %}متوفر{% endif %}</td></tr>{% else %}<tr><td colspan="5">لا توجد أصناف.</td></tr>{% endfor %}
+</table></div>{% endblock %}

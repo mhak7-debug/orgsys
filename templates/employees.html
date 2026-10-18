@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block body %}
+<h1>الموظفون {% if can('hr') %}<a class="btn" href="{{ url_for('employee_edit') }}">+ موظف جديد</a>{% endif %}</h1>
+<div class="scroll"><table><tr><th>الاسم</th><th>الوظيفة</th><th>القسم</th><th>الهاتف</th><th>التعيين</th>{% if can('hr') %}<th>الراتب</th>{% endif %}<th>رصيد الإجازة</th><th>الحالة</th><th></th></tr>
+{% for e in rows %}<tr><td>{{ e.name }}</td><td>{{ e.job_title }}</td><td>{{ e.department }}</td><td>{{ e.phone }}</td><td>{{ e.hire_date }}</td>
+{% if can('hr') %}<td>{{ e.salary|money }}</td>{% endif %}<td>{{ '%g'|format(e.leave_balance) }}</td><td>{{ 'نشط' if e.status=='active' else 'غير نشط' }}</td>
+<td>{% if can('hr') %}<a href="{{ url_for('employee_edit', eid=e.id) }}">تعديل</a>{% endif %}</td></tr>{% endfor %}
+</table></div>{% endblock %}

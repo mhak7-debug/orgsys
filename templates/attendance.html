@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block body %}
+<h1>الحضور والغياب</h1>
+<form method="get" class="inline card"><div><label>اليوم</label><input type="date" name="day" value="{{ day }}"></div><button>عرض</button></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="day" value="{{ day }}">
+<div class="scroll"><table><tr><th>الموظف</th><th>الحالة</th><th>ملاحظة</th></tr>
+{% for r in rows %}<tr><td>{{ r.name }}</td>
+<td>{% if can_edit %}<select name="st_{{ r.id }}">{% for k,v in ATT.items() %}<option value="{{ k }}" {{ 'selected' if (r.status or 'present')==k }}>{{ v }}</option>{% endfor %}</select>{% else %}{{ ATT[r.status] if r.status else '—' }}{% endif %}</td>
+<td>{% if can_edit %}<input name="nt_{{ r.id }}" value="{{ r.note or '' }}">{% else %}{{ r.note or '' }}{% endif %}</td></tr>{% endfor %}
+</table></div>
+{% if can_edit %}<p><button>حفظ الحضور</button></p>{% endif %}</form>{% endblock %}

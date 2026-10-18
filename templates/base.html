@@ -1,0 +1,44 @@
+{% macro side(endpoint, label, icon, roles=(), active=(), badge=0) %}{% if not roles or can(*roles) %}<a class="side-item {{ 'active' if request.endpoint in (active or (endpoint,)) }}" href="{{ url_for(endpoint) }}"><span class="ic">{{ icon }}</span>{{ label }}{% if badge %}<span class="cnt">{{ badge }}</span>{% endif %}</a>{% endif %}{% endmacro %}
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}{{ org }}{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body>
+{% if user %}
+<div class="navbar">
+ <a class="brand" href="{{ url_for('dashboard') }}">{{ org }}</a>
+ <form class="search" method="get" action="{{ url_for('search') }}"><input type="search" name="q" placeholder="ابحث برقم الطلب أو عنوانه…"></form>
+ <div class="nav-right">
+  <a class="bell" href="{{ url_for('notifications') }}" title="الإشعارات">🔔{% if unread %}<span class="n">{{ unread }}</span>{% endif %}</a>
+  <details class="menu"><summary><span class="avatar">{{ user.full_name[:1] }}</span>{{ user.full_name }}</summary>
+   <div class="drop">
+    <a href="{{ url_for('signature') }}">✍ توقيعي الإلكتروني</a>
+    <a href="{{ url_for('password') }}">🔒 كلمة المرور</a>
+    {% if user.role=='admin' %}<form method="post" action="{{ url_for('backup') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>💾 نسخة احتياطية</button></form>{% endif %}
+    <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>⎋ تسجيل الخروج</button></form>
+    <div class="muted" style="padding:6px 10px">{{ ROLES[user.role] }}</div>
+   </div></details>
+ </div>
+</div>
+<div class="layout">
+ <aside class="sidebar">
+  {{ side('dashboard','مساحة العمل','🏠') }}
+  <div class="side-title">الإداريات</div>
+  {{ side('requests_list','الطلبات','📨',active=('requests_list','request_view','request_new'),badge=pending_count) }}
+  {{ side('notifications','الإشعارات','🔔',badge=unread) }}
+  {% if can('hr','manager','accountant') %}<div class="side-title">الموارد البشرية</div>{% endif %}
+  {{ side('employees','الموظفون','👥',('hr','manager'),('employees','employee_edit')) }}
+  {{ side('attendance','الحضور والغياب','🗓',('hr','manager')) }}
+  {{ side('payroll','الرواتب','💵',('hr','accountant')) }}
+  {% if can('store','manager','accountant') %}<div class="side-title">المخزون والمالية</div>{% endif %}
+  {{ side('inventory','المخزون','📦',('store','manager'),('inventory','inventory_moves')) }}
+  {{ side('accounting','المحاسبة','📒',('accountant',)) }}
+  {% if user.role=='admin' %}<div class="side-title">النظام</div>
+  {{ side('users','المستخدمون','🔑') }}{{ side('audit','سجل العمليات','📜') }}{% endif %}
+ </aside>
+ <div class="page">
+{% else %}<div class="public">{% endif %}
+{% for cat,msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+{% block body %}{% endblock %}
+{% if user %}</div></div>{% else %}</div>{% endif %}
+</body></html>

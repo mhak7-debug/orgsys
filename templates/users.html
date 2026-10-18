@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block body %}
+<h1>المستخدمون</h1>
+<div class="card"><h2 style="margin-top:0">مستخدم جديد</h2>
+<form method="post" class="row"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div><label>اسم المستخدم (إنجليزي)</label><input name="username" required></div>
+<div><label>الاسم الكامل</label><input name="full_name" required></div>
+<div><label>الدور</label><select name="role">{% for k,v in ROLES.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+<div><label>ربط بموظف</label><select name="employee_id"><option value="">—</option>{% for e in emps %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+<div><label>كلمة المرور (8+)</label><input name="password" type="password" required minlength="8"></div>
+<div style="align-self:end"><button>إضافة</button></div></form></div>
+<div class="scroll"><table><tr><th>المستخدم</th><th>الاسم</th><th>الدور</th><th>الموظف</th><th>التوقيع</th><th>الحالة</th><th>إجراءات</th></tr>
+{% for r in rows %}<tr><td>{{ r.username }}</td><td>{{ r.full_name }}</td><td>{{ ROLES[r.role] }}</td><td>{{ r.emp or '—' }}</td>
+<td>{{ '✓' if r.signature else '—' }}</td><td>{{ 'نشط' if r.active else 'معطل' }}</td><td>
+{% if r.id != user.id %}<form method="post" action="{{ url_for('user_toggle', uid=r.id) }}" style="display:inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="gray">{{ 'تعطيل' if r.active else 'تفعيل' }}</button></form>{% endif %}
+<form method="post" action="{{ url_for('user_reset', uid=r.id) }}" class="inline" style="display:inline-flex;margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input name="password" type="password" placeholder="كلمة مرور جديدة" minlength="8" required><button class="gray">تعيين</button></form></td></tr>{% endfor %}
+</table></div>{% endblock %}

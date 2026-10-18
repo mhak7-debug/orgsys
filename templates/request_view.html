@@ -1,0 +1,72 @@
+{% extends "base.html" %}{% block body %}
+{% set st = req_status(r) %}
+<h1>{{ r.title }} <span class="ind {{ st[1] }}">{{ st[0] }}</span></h1>
+<p class="muted" style="margin-top:-8px">طلب #{{ r.id }} — {{ TYPES[r.type].label }}</p>
+<p class="noprint"><a class="btn gray" href="{{ url_for('request_print', rid=r.id) }}" target="_blank">🖨 طباعة</a>
+{% if sealed_ok %}<a class="btn" href="{{ url_for('request_sealed', rid=r.id) }}">⬇ الملف المختوم (PDF)</a>{% endif %}
+{% if is_owner and r.status=='pending' %}<form method="post" action="{{ url_for('request_cancel', rid=r.id) }}" style="display:inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="red">إلغاء الطلب</button></form>{% endif %}
+<a href="{{ url_for('requests_list') }}">رجوع للقائمة</a></p>
+
+<div class="card"><div class="flow">
+ <div class="fstep done"><div class="dot">✓</div><b>{{ r.requester }}</b><small>مقدّم الطلب</small></div>
+ {% set ns = namespace(cur=false) %}
+ {% for s in steps %}
+  {% set cls = 'done' if s.status=='approved' else 'rejected' if s.status=='rejected' else ('current' if (s.status=='pending' and not ns.cur) else '') %}
+  {% if s.status=='pending' %}{% set ns.cur = true %}{% endif %}
+  <div class="fstep {{ cls }}"><div class="dot">{{ '✓' if cls=='done' else '✕' if cls=='rejected' else loop.index }}</div>
+   <b>{{ ROLES[s.role] }}</b><small>{{ STEP_KINDS[s.kind or 'approve'] }}{% if s.actor_name %} — {{ s.actor_name }}{% endif %}</small></div>
+ {% endfor %}
+</div></div>
+
+<div class="cols"><div>
+<div class="card"><div class="sec-title">تفاصيل الطلب</div><dl class="kv">
+<dt>مقدم الطلب</dt><dd>{{ r.requester }}</dd><dt>تاريخ التقديم</dt><dd>{{ r.created_at }}</dd>
+{% if r.category %}<dt>التصنيف</dt><dd>{{ r.category }}</dd>{% endif %}
+{% if r.amount %}<dt>المبلغ المطلوب</dt><dd><b>{{ r.amount|money }}</b></dd>{% endif %}
+{% if r.date_from %}<dt>الفترة</dt><dd>{{ r.date_from }}{% if r.date_to %} ← {{ r.date_to }} ({{ '%g'|format(r.days) }} يوم){% endif %}</dd>{% endif %}
+{% if item %}<dt>الصنف</dt><dd>{{ item.name }} × {{ '%g'|format(r.qty) }}</dd>{% endif %}
+<dt>التفاصيل</dt><dd>{{ r.details or '—' }}</dd>
+{% if r.attachment %}<dt>المرفق</dt><dd><a href="{{ url_for('request_file', rid=r.id) }}">{{ r.attachment_name }}</a></dd>{% endif %}
+</dl></div>
+
+{% if r.paid_amount %}<div class="card"><div class="sec-title">بيانات الصرف <span class="ind green">تم الصرف</span></div><dl class="kv">
+<dt>المبلغ المصروف</dt><dd><b>{{ r.paid_amount|money }}</b>{% if r.amount and r.paid_amount != r.amount %} <span class="ind orange">يختلف عن المطلوب</span>{% endif %}</dd>
+<dt>الحساب</dt><dd>{{ r.paid_account }}</dd><dt>رقم المرجع / الإيصال</dt><dd>{{ r.paid_ref or '—' }}</dd>
+<dt>تاريخ الصرف</dt><dd>{{ r.paid_date }}</dd><dt>صُرف بواسطة</dt><dd>{{ paid_by.full_name if paid_by else '—' }}</dd></dl></div>{% endif %}
+
+{% if can_act %}<div class="card noprint"><div class="sec-title">{{ 'تنفيذ الصرف' if r.cur_kind=='disburse' else 'الاعتماد النهائي للإدارة' if r.cur_kind=='ack' else 'قرارك' }}</div>
+{% if needs_sig %}<div class="flash error">لم تسجّل توقيعك الإلكتروني بعد. <a href="{{ url_for('signature', next=request.path) }}">سجّل توقيعك الآن</a></div>{% endif %}
+{% if user.role=='admin' and r.cur_role!='admin' %}<div class="flash error">ستوقّع <b>بالإنابة</b> عن «{{ ROLES[r.cur_role] }}»، وسيظهر ذلك في الملف المختوم.</div>{% endif %}
+<form method="post" action="{{ url_for('request_act', rid=r.id) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% if r.cur_kind=='disburse' %}<div class="row" style="margin-bottom:12px">
+<div><label>المبلغ المصروف</label><input name="paid_amount" type="number" step="0.01" min="0.01" value="{{ r.amount }}"></div>
+<div><label>الحساب</label><select name="paid_account">{% for a in ACCOUNTS %}<option>{{ a }}</option>{% endfor %}</select></div>
+<div><label>تاريخ الصرف</label><input type="date" name="paid_date" value="{{ today }}"></div>
+<div><label>رقم المرجع / الإيصال</label><input name="paid_ref" maxlength="60"></div></div>
+<p class="muted">عند التوقيع يُسجَّل مصروف تلقائياً في المحاسبة وتُرسل الإدارة إشعاراً بإتمام الصرف.</p>{% endif %}
+{% if r.cur_kind=='ack' %}<p class="muted">تم الصرف كما هو موضح أعلاه. بتوقيعك تعتمد العملية نهائياً ويُختم الملف.</p>{% endif %}
+<label>ملاحظة (إلزامية عند الرفض)</label><textarea name="note" maxlength="500"></textarea>
+<label style="margin-top:10px">كلمة المرور لتأكيد التوقيع</label><input name="password" type="password" autocomplete="current-password" style="max-width:280px">
+<p><button class="green" name="action" value="approve">✍ وقّع {{ 'واصرف' if r.cur_kind=='disburse' else 'واعتمد نهائياً' if r.cur_kind=='ack' else 'ووافق' }}</button>
+<button class="red" name="action" value="reject">رفض</button></p></form></div>{% endif %}
+
+<div class="card"><div class="sec-title">التوقيعات والموافقات</div>
+{% for s in steps %}<div class="tl-item {{ s.status }}"><div class="tl-ic">{{ '✓' if s.status=='approved' else '✕' if s.status=='rejected' else '…' }}</div><div style="flex:1">
+<b>{{ ROLES[s.role] }} — {{ STEP_KINDS[s.kind or 'approve'] }}</b> <span class="badge {{ s.status }}">{{ STATUS.get(s.status, s.status) }}</span>
+{% if s.on_behalf %}<span class="ind orange">بالإنابة</span>{% endif %}
+{% if s.actor_name or s.actor %}<div>{{ s.actor_name or s.actor }} <span class="muted">{{ s.acted_at }}</span></div>{% endif %}
+{% if s.note %}<div class="muted">«{{ s.note }}»</div>{% endif %}
+{% if s.sig %}<img class="sig-thumb" src="{{ s.sig }}" alt="توقيع">{% endif %}
+{% if s.chain_hash %}<div class="hash">{{ s.chain_hash[:32] }}…</div>{% endif %}</div></div>{% endfor %}</div>
+</div>
+
+<div>
+{% if r.seal_code %}<div class="card seal-ok"><div class="sec-title">🔏 الختم الإلكتروني</div>
+<dl class="kv" style="grid-template-columns:90px 1fr"><dt>رمز الختم</dt><dd><b dir="ltr">{{ r.seal_code }}</b></dd><dt>التاريخ</dt><dd>{{ r.sealed_at }}</dd></dl>
+<div class="hash" style="margin:8px 0">{{ r.seal_hash }}</div>
+<p><a class="btn gray" href="{{ url_for('verify', code=r.seal_code) }}">صفحة التحقق</a></p></div>
+{% elif r.status=='approved' and user.role=='admin' %}<div class="card"><div class="sec-title">الملف المختوم</div><p class="muted">لم يُولَّد الملف المختوم.</p>
+<form method="post" action="{{ url_for('request_reseal', rid=r.id) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>توليد الملف المختوم</button></form></div>{% endif %}
+{% if chain_ok is true %}<div class="card"><span class="ind green">✓ سلسلة التوقيعات سليمة</span><p class="muted">كل توقيع مرتبط ببصمة تشفيرية بما قبله وببيانات الطلب.</p></div>
+{% elif chain_ok is false %}<div class="card"><span class="ind red">⚠ تم تعديل بيانات الطلب بعد التوقيع</span></div>{% endif %}
+</div></div>{% endblock %}

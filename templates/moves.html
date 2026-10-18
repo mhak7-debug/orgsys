@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block body %}
+<h1>سجل حركات المخزون</h1>
+<div class="scroll"><table><tr><th>التاريخ</th><th>الصنف</th><th>الكمية</th><th>ملاحظة</th><th>بواسطة</th></tr>
+{% for m in rows %}<tr><td>{{ m.created_at }}</td><td>{{ m.name }}</td><td>{{ ('+' if m.qty>0 else '') ~ ('%g'|format(m.qty)) }}</td><td>{{ m.note }}</td><td>{{ m.who }}</td></tr>{% endfor %}
+</table></div>{% endblock %}

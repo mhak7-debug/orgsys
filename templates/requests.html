@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block body %}
+<h1>الطلبات <a class="btn" href="{{ url_for('request_new', type='financial') }}">+ طلب مالي</a><a class="btn gray" href="{{ url_for('request_new', type='leave') }}">+ طلب جديد</a></h1>
+{% if pending %}<div class="card"><div class="sec-title">بانتظار قرارك ({{ pending|length }})</div><div class="scroll"><table>
+<tr><th>#</th><th>النوع</th><th>العنوان</th><th>مقدم الطلب</th><th>المطلوب منك</th><th></th></tr>
+{% for r in pending %}<tr><td>{{ r.id }}</td><td>{{ TYPES[r.type].label }}</td><td>{{ r.title }}</td><td>{{ r.requester }}</td><td>{{ STEP_KINDS[r.cur_kind or 'approve'] }}</td><td><a href="{{ url_for('request_view', rid=r.id) }}">مراجعة</a></td></tr>{% endfor %}</table></div></div>{% endif %}
+<div class="tabs"><a class="{{ 'on' if scope=='mine' }}" href="?scope=mine">طلباتي</a>{% if can('manager','hr') %}<a class="{{ 'on' if scope=='all' }}" href="?scope=all">كل الطلبات</a>{% endif %}</div>
+<form method="get" class="list-bar"><input type="hidden" name="scope" value="{{ scope }}">
+<div><label>بحث</label><input name="q" value="{{ text }}" placeholder="رقم أو عنوان"></div>
+<div><label>النوع</label><select name="type"><option value="">الكل</option>{% for k,t in TYPES.items() %}<option value="{{ k }}" {{ 'selected' if k==typ }}>{{ t.label }}</option>{% endfor %}</select></div>
+<div><label>الحالة</label><select name="status"><option value="">الكل</option>{% for k,v in STATUS.items() %}<option value="{{ k }}" {{ 'selected' if k==st }}>{{ v }}</option>{% endfor %}</select></div>
+<button class="gray">تصفية</button></form>
+<p class="muted">{{ rows|length }} نتيجة</p>
+<div class="scroll"><table><tr><th>#</th><th>النوع</th><th>العنوان</th><th>المبلغ</th><th>مقدم الطلب</th><th>الحالة</th><th>التاريخ</th><th></th></tr>
+{% for r in rows %}{% set s2 = req_status(r) %}<tr><td>{{ r.id }}</td><td>{{ TYPES[r.type].label }}</td><td>{{ r.title }}</td><td>{{ r.amount|money if r.amount else '' }}</td><td>{{ r.requester }}</td>
+<td><span class="ind {{ s2[1] }}">{{ s2[0] }}</span></td><td>{{ r.created_at }}</td><td><a href="{{ url_for('request_view', rid=r.id) }}">فتح</a></td></tr>
+{% else %}<tr><td colspan="8">لا توجد طلبات.</td></tr>{% endfor %}</table></div>{% endblock %}

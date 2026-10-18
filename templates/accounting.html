@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block body %}
+<h1>المحاسبة</h1>
+<div class="grid">
+{% for a in ACCOUNTS %}<div class="stat"><b>{{ (bal.get(a) or 0)|money }}</b><span>رصيد {{ a }}</span></div>{% endfor %}
+<div class="stat"><b>{{ inc|money }}</b><span>إيرادات {{ month }}</span></div>
+<div class="stat"><b>{{ exp|money }}</b><span>مصروفات {{ month }}</span></div>
+<div class="stat"><b>{{ (inc-exp)|money }}</b><span>صافي الشهر</span></div></div>
+<div class="card"><h2 style="margin-top:0">قيد جديد</h2><form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input type="date" name="day" value="{{ today }}" required><select name="kind"><option value="income">إيراد</option><option value="expense">مصروف</option></select>
+<input name="category" placeholder="التصنيف (إيجار، كهرباء...)"><input name="amount" type="number" step="0.01" min="0.01" placeholder="المبلغ" required>
+<select name="account">{% for a in ACCOUNTS %}<option>{{ a }}</option>{% endfor %}</select><input name="description" placeholder="البيان"><button>تسجيل</button></form></div>
+<form method="get" class="inline card"><div><label>الشهر</label><input type="month" name="month" value="{{ month }}"></div><button>عرض</button>
+<a class="btn gray" href="{{ url_for('accounting_export', month=month) }}">تصدير CSV</a></form>
+<h2>ملخص حسب التصنيف</h2><div class="scroll"><table><tr><th>النوع</th><th>التصنيف</th><th>المبلغ</th></tr>
+{% for c in cats %}<tr><td>{{ 'إيراد' if c.kind=='income' else 'مصروف' }}</td><td>{{ c.c }}</td><td>{{ c.a|money }}</td></tr>{% endfor %}</table></div>
+<h2>القيود</h2><div class="scroll"><table><tr><th>التاريخ</th><th>النوع</th><th>التصنيف</th><th>المبلغ</th><th>الحساب</th><th>البيان</th><th></th></tr>
+{% for r in rows %}<tr><td>{{ r.day }}</td><td>{{ 'إيراد' if r.kind=='income' else 'مصروف' }}</td><td>{{ r.category }}</td><td>{{ r.amount|money }}</td><td>{{ r.account }}</td><td>{{ r.description }}</td>
+<td>{% if user.role=='admin' %}<form method="post" action="{{ url_for('transaction_delete', tid=r.id) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="red">حذف</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7">لا توجد قيود.</td></tr>{% endfor %}</table></div>{% endblock %}

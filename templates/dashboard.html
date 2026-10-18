@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block body %}
+<h1>مساحة العمل <span class="muted">مرحباً {{ user.full_name }}</span></h1>
+<div class="grid">
+ <div class="stat"><span>طلباتي قيد الموافقة</span><b>{{ s.my_open }}</b></div>
+ <div class="stat"><span>بانتظار قراري</span><b class="{{ 'low' if pending_count }}">{{ pending_count }}</b></div>
+ {% if emp %}<div class="stat"><span>رصيد إجازاتي (يوم)</span><b>{{ '%g'|format(emp.leave_balance) }}</b></div>{% endif %}
+ {% if s.emps is defined %}<div class="stat"><span>موظف نشط</span><b>{{ s.emps }}</b></div>{% endif %}
+ {% if s.low is defined %}<div class="stat"><span>أصناف تحت الحد الأدنى</span><b class="{{ 'low' if s.low }}">{{ s.low }}</b></div>{% endif %}
+ {% if s.income is defined %}<div class="stat"><span>إيرادات هذا الشهر</span><b>{{ s.income|money }}</b></div><div class="stat"><span>مصروفات هذا الشهر</span><b>{{ s.expense|money }}</b></div>{% endif %}
+</div>
+<div class="card"><div class="sec-title">اختصارات</div><div class="shortcuts">
+{% for k,t in TYPES.items() if not t.hidden %}<a class="sc" href="{{ url_for('request_new', type=k) }}">{{ '💰' if k=='financial' else '➕' }} {{ t.label }}</a>{% endfor %}
+<a class="sc" href="{{ url_for('signature') }}">✍ توقيعي الإلكتروني</a></div></div>
+{% if pending %}<h2>بانتظار قرارك</h2><div class="scroll"><table>
+<tr><th>#</th><th>النوع</th><th>العنوان</th><th>مقدم الطلب</th><th>المطلوب منك</th><th></th></tr>
+{% for r in pending %}<tr><td>{{ r.id }}</td><td>{{ TYPES[r.type].label }}</td><td>{{ r.title }}</td><td>{{ r.requester }}</td><td>{{ STEP_KINDS[r.cur_kind or 'approve'] }}</td><td><a href="{{ url_for('request_view', rid=r.id) }}">فتح</a></td></tr>{% endfor %}</table></div>{% endif %}
+{% if mine %}<h2>طلباتي الأخيرة</h2><div class="scroll"><table><tr><th>#</th><th>النوع</th><th>العنوان</th><th>الحالة</th><th></th></tr>
+{% for r in mine %}{% set st = req_status(r) %}<tr><td>{{ r.id }}</td><td>{{ TYPES[r.type].label }}</td><td>{{ r.title }}</td><td><span class="ind {{ st[1] }}">{{ st[0] }}</span></td><td><a href="{{ url_for('request_view', rid=r.id) }}">عرض</a></td></tr>{% endfor %}</table></div>{% endif %}
+{% endblock %}

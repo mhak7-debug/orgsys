@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block body %}
+<h1>التحقق من ملف مختوم</h1>
+<div class="card"><form method="get" class="inline"><div><label>رمز الختم (مثال: A1B2-C3D4-E5F6)</label><input name="code" value="{{ code }}" dir="ltr" required></div><button>تحقق</button></form></div>
+{% if code and not r %}<div class="flash error">لا يوجد ملف مختوم بهذا الرمز.</div>{% endif %}
+{% if r %}
+<div class="card {{ 'seal-ok' if chain_ok is not false }}">
+ <div class="sec-title">{% if chain_ok is false %}<span class="ind red">⚠ تم العبث بالبيانات - التوقيعات غير سليمة</span>{% else %}<span class="ind green">✓ ملف مختوم صحيح</span>{% endif %}</div>
+ <dl class="kv"><dt>المؤسسة</dt><dd>{{ org }}</dd><dt>رقم الطلب</dt><dd>#{{ r.id }} — {{ TYPES[r.type].label }}</dd>
+ <dt>مقدم الطلب</dt><dd>{{ r.requester }}</dd>{% if r.amount %}<dt>المبلغ</dt><dd>{{ r.amount|money }}</dd>{% endif %}
+ {% if r.paid_amount %}<dt>المصروف</dt><dd>{{ r.paid_amount|money }} — {{ r.paid_date }}</dd>{% endif %}
+ <dt>تاريخ الختم</dt><dd>{{ r.sealed_at }}</dd><dt>بصمة الختم</dt><dd class="hash">{{ r.seal_hash }}</dd></dl></div>
+<h2>التوقيعات</h2><div class="card">{% for s in steps %}<div class="tl-item approved"><div class="tl-ic">✓</div><div>
+<b>{{ ROLES[s.role] }} — {{ STEP_KINDS[s.kind or 'approve'] }}</b>{% if s.on_behalf %} <span class="ind orange">بالإنابة</span>{% endif %}<div>{{ s.actor_name }}</div><div class="muted">{{ s.acted_at }}</div>
+{% if s.sig %}<img class="sig-thumb" src="{{ s.sig }}" alt="توقيع">{% endif %}</div></div>{% endfor %}</div>
+<div class="card"><div class="sec-title">فحص ملف PDF لديك</div><p class="muted">ارفع الملف لمقارنة بصمته (SHA-256) بالبصمة المسجلة وقت الختم.</p>
+<form method="post" enctype="multipart/form-data" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="code" value="{{ code }}"><input type="file" name="file" accept="application/pdf" required><button>فحص</button></form>
+{% if file_ok is true %}<p><span class="ind green">✓ الملف مطابق للأصل المختوم</span></p>{% elif file_ok is false %}<p><span class="ind red">✗ الملف لا يطابق الأصل (عُدّل أو ليس النسخة المختومة)</span></p>{% endif %}</div>
+{% endif %}{% endblock %}

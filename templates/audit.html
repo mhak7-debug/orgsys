@@ -1,0 +1,4 @@
+{% extends "base.html" %}{% block body %}
+<h1>سجل العمليات (آخر 300)</h1>
+<div class="scroll"><table><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th></tr>
+{% for a in rows %}<tr><td>{{ a.at }}</td><td>{{ a.who or '—' }}</td><td>{{ a.action }}</td></tr>{% endfor %}</table></div>{% endblock %}

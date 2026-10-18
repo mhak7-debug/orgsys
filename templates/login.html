@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block body %}
+<div class="login-wrap"><div class="logo">{{ org[:1] }}</div><h1 style="justify-content:center">{{ org }}</h1>
+<div class="card"><form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<label>اسم المستخدم</label><input name="username" autocomplete="username" required autofocus>
+<label style="margin-top:10px">كلمة المرور</label><input name="password" type="password" autocomplete="current-password" required>
+<p><button style="width:100%;justify-content:center">تسجيل الدخول</button></p></form></div>
+<a class="muted" href="{{ url_for('verify') }}">التحقق من ملف مختوم</a></div>{% endblock %}

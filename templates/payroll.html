@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block body %}
+<h1>الرواتب</h1>
+<div class="card inline"><form method="get" class="inline"><div><label>الشهر</label><input type="month" name="month" value="{{ month }}"></div><button>عرض</button></form>
+{% if can('hr') %}<form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="month" value="{{ month }}"><button class="green">توليد كشف الشهر</button></form>{% endif %}</div>
+<p class="muted">الخصم التلقائي = الراتب ÷ 30 × أيام الغياب المسجلة. يمكن تعديل البدلات والخصومات قبل الصرف.</p>
+<div class="scroll"><table><tr><th>الموظف</th><th>الأساسي</th><th>بدلات</th><th>خصومات</th><th>الصافي</th><th>ملاحظة</th><th>الحالة</th></tr>
+{% for r in rows %}<tr><td>{{ r.name }}</td><td>{{ r.base|money }}</td>
+{% if can('hr') and not r.paid %}
+<td><input form="pf{{ r.id }}" name="allowances" type="number" step="0.01" min="0" value="{{ r.allowances }}"></td><td><input form="pf{{ r.id }}" name="deductions" type="number" step="0.01" min="0" value="{{ r.deductions }}"></td>
+<td>{{ r.net|money }}</td><td><form id="pf{{ r.id }}" method="post" action="{{ url_for('payroll_edit', pid=r.id) }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input name="note" value="{{ r.note or '' }}"><button class="gray">حفظ</button></form></td>
+{% else %}<td>{{ r.allowances|money }}</td><td>{{ r.deductions|money }}</td><td>{{ r.net|money }}</td><td>{{ r.note or '' }}</td>{% endif %}
+<td>{% if r.paid %}<span class="badge approved">مصروف</span>{% elif can('accountant') %}
+<form method="post" action="{{ url_for('payroll_pay', pid=r.id) }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><select name="account">{% for a in ACCOUNTS %}<option>{{ a }}</option>{% endfor %}</select><button class="green">صرف</button></form>
+{% else %}<span class="badge pending">غير مصروف</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7">لا يوجد كشف لهذا الشهر.</td></tr>{% endfor %}
+<tr><th>الإجمالي</th><th colspan="3"></th><th>{{ total|money }}</th><th colspan="2"></th></tr></table></div>{% endblock %}

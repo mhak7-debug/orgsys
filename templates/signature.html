@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block body %}
+<h1>توقيعي الإلكتروني</h1>
+<div class="card" style="max-width:600px">
+{% if user.signature %}<div class="sec-title">توقيعك الحالي</div><img class="sig-thumb" style="height:70px" src="{{ user.signature }}" alt="توقيعك"><hr style="border:0;border-top:1px solid #eee;margin:14px 0">{% endif %}
+<div class="sec-title">{{ 'استبدال التوقيع' if user.signature else 'ارسم توقيعك' }}</div>
+<p class="muted">ارسم توقيعك بالفأرة أو بإصبعك. سيُدرج في كل مستند توقّعه، ولا يُعتمد التوقيع إلا بإعادة إدخال كلمة المرور عند كل اعتماد.</p>
+<form method="post" id="sigform" action="{{ url_for('signature', next=nxt) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="data" id="data">
+<canvas id="pad" width="520" height="190"></canvas>
+<p><button>حفظ التوقيع</button> <button type="button" class="gray" id="clear">مسح</button></p></form></div>
+<script src="{{ url_for('static', filename='sign.js') }}"></script>{% endblock %}

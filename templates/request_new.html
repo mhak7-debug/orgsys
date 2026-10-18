@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block body %}
+<h1>{{ TYPES[typ].label }} <span class="ind gray">جديد</span></h1>
+<div class="tabs">{% for k,t in TYPES.items() if not t.hidden %}<a class="{{ 'on' if k==typ }}" href="{{ url_for('request_new', type=k) }}">{{ t.label }}</a>{% endfor %}</div>
+<div class="card"><form method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="type" value="{{ typ }}">
+<div class="row">
+<div><label>العنوان (اختياري)</label><input name="title" maxlength="200" value="{{ request.form.get('title','') }}"></div>
+{% if typ=='financial' %}
+<div><label>التصنيف</label><select name="category" required>{% for c in CATEGORIES %}<option {{ 'selected' if request.form.get('category')==c }}>{{ c }}</option>{% endfor %}</select></div>
+<div><label>المبلغ المطلوب</label><input name="amount" type="number" step="0.01" min="0.01" required value="{{ request.form.get('amount','') }}"></div>{% endif %}
+{% if typ=='leave' %}
+<div><label>من تاريخ</label><input type="date" name="date_from" required value="{{ request.form.get('date_from','') }}"></div>
+<div><label>إلى تاريخ</label><input type="date" name="date_to" required value="{{ request.form.get('date_to','') }}"></div>
+<div><label>رصيدك الحالي</label><input value="{{ '%g'|format(emp.leave_balance) if emp else 'غير مرتبط بموظف' }}" disabled></div>{% endif %}
+{% if typ=='exit' %}<div><label>تاريخ الإذن</label><input type="date" name="date_from" required value="{{ request.form.get('date_from', today) }}"></div>{% endif %}
+{% if typ=='material' %}
+<div><label>الصنف (اختياري)</label><select name="item_id"><option value="">—</option>{% for i in items %}<option value="{{ i.id }}">{{ i.name }}{% if i.unit %} ({{ i.unit }}){% endif %}</option>{% endfor %}</select></div>
+<div><label>الكمية</label><input name="qty" type="number" step="0.01" min="0.01"></div>{% endif %}
+</div>
+<label style="margin-top:12px">التفاصيل / السبب</label><textarea name="details" maxlength="4000">{{ request.form.get('details','') }}</textarea>
+<label style="margin-top:12px">مرفق (pdf, png, jpg, docx, xlsx — حتى 5MB)</label><input type="file" name="file">
+<p class="muted">مسار الاعتماد:
+أنت{% for role,kind in TYPES[typ].chain %} ← {{ ROLES[role] }} ({{ STEP_KINDS[kind] }}){% endfor %}.
+كل جهة توقّع إلكترونياً عبر المنصة، ويُولَّد ملف PDF مختوم عند اكتمال التوقيعات.</p>
+<button>إرسال الطلب</button></form></div>{% endblock %}
