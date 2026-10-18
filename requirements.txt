@@ -2,3 +2,4 @@ Flask>=3.0
 reportlab>=4.0
 Pillow>=10.0
 waitress>=3.0
+psycopg[binary]>=3.2

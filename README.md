@@ -4,7 +4,20 @@
 Python + Flask + SQLite. الواجهة بنمط ERPNext (شريط علوي + قائمة جانبية + مؤشرات حالة + نماذج وقوائم)
 مكتوبة من الصفر بتنسيق خاص (لم يُنسخ أي كود من ERPNext).
 
-## التشغيل
+## التشغيل على Vercel (عبر الإنترنت)
+النظام يكتشف تلقائياً وجود `DATABASE_URL` فيستخدم **Postgres (Neon)** بدل SQLite، ويحفظ المرفقات والملفات
+المختومة داخل قاعدة البيانات (جدول `files`)، لأن نظام ملفات Vercel للقراءة فقط.
+- **الارتباطات المطلوبة:** تكامل **Neon** فقط (يضيف `DATABASE_URL` تلقائياً).
+- **متغيرات مستحسنة (Settings ← Environment Variables):**
+  `ORG_NAME` اسم المؤسسة، `BASE_URL` رابط الموقع (مثل `https://orgsys.vercel.app`) ليظهر صحيحاً في رمز QR،
+  و`SECRET_KEY` اختياري (إن لم يُحدَّد يُولَّد تلقائياً ويُحفظ في قاعدة البيانات).
+- **نقل بيانات SQLite موجودة إلى Neon:**
+  `DATABASE_URL=postgresql://... python migrate_to_postgres.py data/org.db`
+- **صورة الختم** على Vercel: تُنقل `data/stamp.png` بسكربت النقل أعلاه (تُحفظ في جدول `files` باسم `stamp.png`).
+- النسخة الاحتياطية على Postgres تُنزَّل بصيغة JSON، ويمكن أيضاً استعادة نقاط زمنية من لوحة Neon.
+- حد المرفق على Vercel هو 4MB.
+
+## التشغيل المحلي
 ```bash
 python -m venv venv && source venv/bin/activate      # ويندوز: venv\Scripts\activate
 pip install -r requirements.txt
@@ -67,3 +80,5 @@ ORG_NAME="اسم مؤسستك" BASE_URL="http://عنوان-الخادم:8000" wa
 
 ## الاختبار
 `python test_app.py` — نحو 100 اختبار (الصلاحيات، دورة الصرف، التوقيع، الختم، كشف التلاعب، المخزون، الرواتب).
+لتشغيلها على Postgres في مخطط منفصل: `PG_SCHEMA=orgsys_test DATABASE_URL=<رابط غير مجمّع> python test_app.py`
+(أنشئ المخطط أولاً واحذفه بعد الانتهاء).

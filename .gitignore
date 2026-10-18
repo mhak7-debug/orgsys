@@ -1,0 +1,15 @@
+# بيانات وأسرار محلية — لا تُرفع أبداً
+data/
+*.db
+secret.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# بيئة
+.env
+.env*.local
+.vercel
