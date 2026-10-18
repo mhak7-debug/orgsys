@@ -26,6 +26,8 @@
   <div class="side-title">الإداريات</div>
   {{ side('requests_list','الطلبات','📨',active=('requests_list','request_view','request_new'),badge=pending_count) }}
   {{ side('notifications','الإشعارات','🔔',badge=unread) }}
+  <div class="side-title">المشاريع</div>
+  {{ side('projects','المشاريع وملفاتها','📁',active=('projects','project_view')) }}
   {% if can('hr','manager','accountant') %}<div class="side-title">الموارد البشرية</div>{% endif %}
   {{ side('employees','الموظفون','👥',('hr','manager'),('employees','employee_edit')) }}
   {{ side('attendance','الحضور والغياب','🗓',('hr','manager')) }}

@@ -158,7 +158,7 @@ post(acc, f"/payroll/{p1['id']}/pay", account="الصندوق"); post(acc, f"/pa
 ok(Q("SELECT COUNT(*) c FROM transactions WHERE category='رواتب'", one=True)["c"] == 1, "صرف الراتب مرة واحدة فقط")
 # محاسبة
 post(acc, "/accounting", day="2026-11-02", kind="income", category="تبرعات", amount="10000", account="البنك", description="x")
-ok("10,000.00" in acc.get("/accounting?month=2026-11").get_data(as_text=True), "صفحة المحاسبة")
+ok("10,000.00" in acc.get("/accounting?month=2026-11").get_data(as_text=True), "صفحة المحا��بة")
 post(acc, "/accounting", day="2026-11-02", kind="expense", category="=cmd", amount="-5", account="البنك")
 ok(Q("SELECT COUNT(*) c FROM transactions WHERE category='=cmd'", one=True)["c"] == 0, "رفض مبلغ سالب")
 post(acc, "/accounting", day="2026-11-03", kind="expense", category="=HYPERLINK(1)", amount="5", account="البنك")
@@ -174,8 +174,31 @@ ok("<script>alert(1)</script>" not in emp.get(f"/requests/{rx}").get_data(as_tex
 ok("شراء أحبار" in emp.get("/requests?q=أحبار").get_data(as_text=True) and "شراء أحبار" not in emp.get("/requests?q=zzz").get_data(as_text=True), "بحث الطلبات")
 ok(emp.get("/search?q=x").status_code == 302 and emp.get("/notifications").status_code == 200, "البحث والإشعارات")
 ok(Q("SELECT COUNT(*) c FROM notifications WHERE user_id=(SELECT id FROM users WHERE username='emp1') AND read=0", one=True)["c"] == 0, "قراءة الإشعارات تعلّمها مقروءة")
+# المشاريع وملفاتها
+ok(emp.post("/projects", data={"csrf": "t", "name": "x"}).status_code == 403, "الموظف لا ينشئ مشروعاً")
+post(mgr, "/projects", name="مشروع المبنى", client="البلدية", description="وصف")
+pj = Q("SELECT id FROM projects WHERE name='مشروع المبنى'", one=True)["id"]
+emp.post(f"/projects/{pj}/upload", data={"csrf": "t", "files": [(io.BytesIO(b"%PDF-1 plan"), "خطة.pdf"), (io.BytesIO(b"doc"), "عقد.docx")]}, content_type="multipart/form-data")
+ok(Q("SELECT COUNT(*) c FROM project_files WHERE project_id=?", (pj,), one=True)["c"] == 2, "رفع عدة ملفات للمشروع")
+r = emp.post(f"/projects/{pj}/upload", data={"csrf": "t", "relpath": "مخططات/الدور الأول/a.dwg", "files": (io.BytesIO(b"dwg"), "a.dwg")}, content_type="multipart/form-data", headers={"X-Requested-With": "fetch"})
+ok(r.status_code == 200 and r.get_json()["ok"] and Q("SELECT 1 FROM project_files WHERE original_name='مخططات/الدور الأول/a.dwg'", one=True), "رفع مجلد مع الحفاظ على المسار")
+r = emp.post(f"/projects/{pj}/upload", data={"csrf": "t", "relpath": "../../evil.exe", "files": (io.BytesIO(b"MZ"), "evil.exe")}, content_type="multipart/form-data", headers={"X-Requested-With": "fetch"})
+ok(r.status_code == 400 and not r.get_json()["ok"], "رفض ملف تنفيذي في المشاريع")
+pf = Q("SELECT id FROM project_files WHERE original_name='خطة.pdf'", one=True)["id"]
+r = store.get(f"/projects/{pj}/files/{pf}"); ok(r.status_code == 200 and r.data == b"%PDF-1 plan", "تنزيل ملف المشروع")
+ok("مشروع المبنى" in store.get("/projects?q=المبنى").get_data(as_text=True) and "عقد.docx" in store.get(f"/projects/{pj}").get_data(as_text=True), "عرض المشاريع وملفاتها")
+ok(store.post(f"/projects/{pj}/files/{pf}/delete", data={"csrf": "t"}).status_code == 403, "لا يحذف ملف غيره")
+post(emp, f"/projects/{pj}/files/{pf}/delete")
+ok(Q("SELECT COUNT(*) c FROM project_files WHERE project_id=?", (pj,), one=True)["c"] == 2, "صاحب الملف يحذفه")
+ok(mgr.post(f"/projects/{pj}/delete", data={"csrf": "t"}).status_code == 403, "حذف المشروع للإدارة فقط")
+post(mgr, f"/projects/{pj}/edit", name="مشروع المبنى", client="البلدية", status="done", description="")
+ok(Q("SELECT status FROM projects WHERE id=?", (pj,), one=True)["status"] == "done", "تعديل حالة المشروع")
+post(adm, "/projects", name="مشروع مؤقت"); pj2 = Q("SELECT id FROM projects WHERE name='مشروع مؤقت'", one=True)["id"]
+emp.post(f"/projects/{pj2}/upload", data={"csrf": "t", "files": (io.BytesIO(b"x"), "a.txt")}, content_type="multipart/form-data")
+post(adm, f"/projects/{pj2}/delete")
+ok(not Q("SELECT 1 FROM projects WHERE id=?", (pj2,), one=True) and not Q("SELECT 1 FROM project_files WHERE project_id=?", (pj2,), one=True), "الإدارة تحذف المشروع وملفاته")
 # كل الصفحات
-for p in ["/", "/requests", "/requests?scope=all&status=approved", "/employees", "/attendance", "/payroll?month=2026-11", "/inventory", "/inventory/moves", "/accounting", "/users", "/audit", "/password", "/signature", f"/requests/{r3}", f"/requests/{r3}/print", f"/requests/{rid}", "/requests/new?type=financial", "/requests/new?type=material", "/requests/new?type=exit", "/employees/1/edit"]:
+for p in ["/", "/requests", "/requests?scope=all&status=approved", "/employees", "/attendance", "/payroll?month=2026-11", "/inventory", "/inventory/moves", "/accounting", "/users", "/audit", "/password", "/signature", f"/requests/{r3}", f"/requests/{r3}/print", f"/requests/{rid}", "/requests/new?type=financial", "/requests/new?type=material", "/requests/new?type=exit", "/employees/1/edit", "/projects", f"/projects/{pj}"]:
     ok(adm.get(p).status_code == 200, "GET " + p)
 for c, n in ((emp, "emp"), (mgr, "mgr"), (hr, "hr"), (acc, "acc"), (store, "store")):
     ok(c.get("/").status_code == 200 and c.get("/requests").status_code == 200, "الصفحات الرئيسية لـ " + n)

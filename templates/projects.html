@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}المشاريع - {{ org }}{% endblock %}{% block body %}
+<h1>المشاريع وملفاتها</h1>
+{% if can_create %}<div class="card"><h2 style="margin-top:0">مشروع جديد</h2>
+<form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input name="name" placeholder="اسم المشروع" required maxlength="150" aria-label="اسم المشروع">
+<input name="client" placeholder="الجهة / العميل" maxlength="150" aria-label="الجهة أو العميل">
+<input name="description" placeholder="وصف مختصر" maxlength="2000" aria-label="وصف مختصر">
+<button>إنشاء المشروع</button></form></div>{% endif %}
+<form method="get" class="inline list-bar" style="margin-bottom:12px">
+<input type="search" name="q" value="{{ text }}" placeholder="ابحث باسم المشروع أو الجهة…" aria-label="بحث">
+<select name="status" aria-label="الحالة"><option value="">كل الحالات</option>{% for k,v in PROJECT_STATUS.items() %}<option value="{{ k }}" {{ 'selected' if st==k }}>{{ v }}</option>{% endfor %}</select>
+<button class="gray">تصفية</button></form>
+<div class="scroll"><table><tr><th>#</th><th>المشروع</th><th>الجهة</th><th>الحالة</th><th>عدد الملفات</th><th>الحجم</th><th>أنشأه</th><th>التاريخ</th></tr>
+{% for p in rows %}<tr><td>{{ p.id }}</td><td><a href="{{ url_for('project_view', pid=p.id) }}"><b>{{ p.name }}</b></a></td><td>{{ p.client or '—' }}</td>
+<td><span class="ind {{ PROJECT_STATUS_COLOR[p.status] }}">{{ PROJECT_STATUS[p.status] }}</span></td>
+<td>{{ p.n }}</td><td>{{ p.sz|filesize }}</td><td>{{ p.who or '—' }}</td><td class="muted">{{ p.created_at }}</td></tr>
+{% else %}<tr><td colspan="8">لا توجد مشاريع بعد.{% if can_create %} أنشئ أول مشروع من النموذج أعلاه.{% endif %}</td></tr>{% endfor %}
+</table></div>{% endblock %}

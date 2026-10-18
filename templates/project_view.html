@@ -1,0 +1,53 @@
+{% extends "base.html" %}{% block title %}{{ p.name }} - {{ org }}{% endblock %}{% block body %}
+<h1><a href="{{ url_for('projects') }}" class="muted">المشاريع</a> / {{ p.name }}
+<span class="ind {{ PROJECT_STATUS_COLOR[p.status] }}">{{ PROJECT_STATUS[p.status] }}</span></h1>
+
+<div class="grid">
+ <div class="stat"><span>عدد الملفات</span><b>{{ files|length }}</b></div>
+ <div class="stat"><span>الحجم الكلي</span><b>{{ total|filesize }}</b></div>
+ <div class="stat"><span>الجهة / العميل</span><b style="font-size:16px">{{ p.client or '—' }}</b></div>
+ <div class="stat"><span>أنشأه</span><b style="font-size:16px">{{ p.who or '—' }}</b></div>
+</div>
+{% if p.description %}<div class="card"><div class="sec-title">وصف المشروع</div><div style="white-space:pre-wrap">{{ p.description }}</div></div>{% endif %}
+
+<div class="card">
+ <div class="sec-title">رفع ملفات المشروع</div>
+ <form method="post" action="{{ url_for('project_upload', pid=p.id) }}" enctype="multipart/form-data" data-upload data-max="{{ limit_mb * 1024 * 1024 }}" data-exts="{{ exts }}">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label class="dropzone" for="pf-files">
+   <b>اسحب الملفات هنا أو اضغط للاختيار</b>
+   <span class="muted">يمكنك اختيار عدة ملفات معاً. الحد الأقصى {{ limit_mb }}MB لكل ملف.</span>
+   <input id="pf-files" type="file" name="files" multiple>
+  </label>
+  <div class="inline" style="margin-top:10px">
+   <label class="btn gray" for="pf-folder" style="flex:0 0 auto;margin:0">رفع مجلد كامل</label>
+   <input id="pf-folder" type="file" webkitdirectory multiple hidden>
+   <span class="muted up-count" aria-live="polite"></span>
+   <button type="submit">رفع الملفات</button>
+  </div>
+  <ul class="up-list" aria-live="polite"></ul>
+  <details class="muted"><summary>الأنواع المسموحة</summary>{{ exts }}</details>
+ </form>
+</div>
+
+<h2>ملفات المشروع</h2>
+<div class="scroll"><table><tr><th>الملف</th><th>الحجم</th><th>رفعه</th><th>التاريخ</th><th></th></tr>
+{% for f in files %}<tr><td><a href="{{ url_for('project_file', pid=p.id, fid=f.id) }}">{{ f.original_name }}</a></td>
+<td>{{ f.size|filesize }}</td><td>{{ f.who or '—' }}</td><td class="muted">{{ f.uploaded_at }}</td>
+<td style="white-space:nowrap"><a class="btn gray" href="{{ url_for('project_file', pid=p.id, fid=f.id) }}">تنزيل</a>
+{% if can_manage or f.uploaded_by == user.id %}<form method="post" action="{{ url_for('project_file_delete', pid=p.id, fid=f.id) }}" style="display:inline" data-confirm="حذف الملف {{ f.original_name }}؟"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="red">حذف</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5">لا توجد ملفات بعد. ارفع ملفات المشروع من الأعلى.</td></tr>{% endfor %}
+</table></div>
+
+{% if can_manage %}<div class="card" style="margin-top:16px"><div class="sec-title">تعديل بيانات المشروع</div>
+<form method="post" action="{{ url_for('project_edit', pid=p.id) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<div class="row">
+ <div><label for="pe-name">اسم المشروع</label><input id="pe-name" name="name" value="{{ p.name }}" required maxlength="150"></div>
+ <div><label for="pe-client">الجهة / العميل</label><input id="pe-client" name="client" value="{{ p.client or '' }}" maxlength="150"></div>
+ <div><label for="pe-status">الحالة</label><select id="pe-status" name="status">{% for k,v in PROJECT_STATUS.items() %}<option value="{{ k }}" {{ 'selected' if p.status==k }}>{{ v }}</option>{% endfor %}</select></div>
+</div>
+<div style="margin-top:10px"><label for="pe-desc">الوصف</label><textarea id="pe-desc" name="description" maxlength="2000">{{ p.description or '' }}</textarea></div>
+<div style="margin-top:10px"><button>حفظ</button></div></form>
+{% if user.role=='admin' %}<form method="post" action="{{ url_for('project_delete', pid=p.id) }}" style="margin-top:12px" data-confirm="حذف المشروع وكل ملفاته نهائياً؟"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="red">حذف المشروع نهائياً</button></form>{% endif %}
+</div>{% endif %}
+<script src="{{ url_for('static', filename='projects.js') }}"></script>{% endblock %}

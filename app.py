@@ -9,6 +9,7 @@ import functools
 import hashlib
 import io
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -20,7 +21,7 @@ from datetime import date, datetime, timedelta
 from functools import wraps
 
 from arabic_pdf import build_sealed_pdf, data_url_to_png
-from flask import (Flask, abort, flash, g, redirect, render_template, request,
+from flask import (Flask, abort, flash, g, jsonify, redirect, render_template, request,
                    send_file, session, url_for)
 from PIL import Image
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -87,6 +88,12 @@ STATUS = {"pending": "قيد الموافقة", "approved": "معتمد",
 ATT = {"present": "حاضر", "absent": "غائب", "late": "متأخر", "leave": "إجازة"}
 ACCOUNTS = ["الصندوق", "البنك"]
 ALLOWED_EXT = {"pdf", "png", "jpg", "jpeg", "docx", "xlsx"}
+PROJECT_EXT = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+               "csv", "txt", "rtf", "odt", "ods", "zip", "rar", "7z", "dwg", "dxf", "skp", "psd", "ai",
+               "mp4", "mov", "mp3", "wav", "json", "xml"}
+PROJECT_STATUS = {"active": "قيد التنفيذ", "on_hold": "متوقف", "done": "مكتمل"}
+PROJECT_STATUS_COLOR = {"active": "blue", "on_hold": "orange", "done": "green"}
+UPLOAD_LIMIT_MB = 4 if ON_VERCEL else 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS employees(
@@ -141,6 +148,13 @@ CREATE TABLE IF NOT EXISTS files(
  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, data BLOB NOT NULL, created_at TEXT);
 CREATE TABLE IF NOT EXISTS settings(
  id INTEGER PRIMARY KEY, k TEXT UNIQUE NOT NULL, v TEXT);
+CREATE TABLE IF NOT EXISTS projects(
+ id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, client TEXT,
+ status TEXT NOT NULL DEFAULT 'active', created_by INTEGER REFERENCES users(id), created_at TEXT);
+CREATE TABLE IF NOT EXISTS project_files(
+ id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+ stored_name TEXT NOT NULL, original_name TEXT NOT NULL, size INTEGER DEFAULT 0,
+ uploaded_by INTEGER REFERENCES users(id), uploaded_at TEXT);
 """
 
 
@@ -295,6 +309,15 @@ def get_file(name):
         return f.read()
 
 
+def del_file(name):
+    if USE_PG:
+        ex("DELETE FROM files WHERE name=?", (name,))
+        return
+    path = os.path.join(DATA, name)
+    if os.path.isfile(path):
+        os.remove(path)
+
+
 def has_file(name):
     if USE_PG:
         return q("SELECT 1 FROM files WHERE name=?", (name,), one=True) is not None
@@ -438,7 +461,10 @@ def e400(_):
 
 @app.errorhandler(413)
 def e413(_):
-    return render_template("msg.html", msg="حجم الملف أكبر من 5 ميغابايت."), 413
+    msg = f"حجم الملف أكبر من {UPLOAD_LIMIT_MB} ميغابايت."
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(ok=False, error=msg), 413
+    return render_template("msg.html", msg=msg), 413
 
 
 ATTEMPTS = {}
@@ -794,6 +820,189 @@ def inventory_moves():
     rows = q("""SELECT m.*, i.name, u.full_name who FROM stock_moves m JOIN items i ON i.id=m.item_id
                 LEFT JOIN users u ON u.id=m.user_id ORDER BY m.id DESC LIMIT 200""")
     return render_template("moves.html", rows=rows)
+
+
+# ----------------------------------------------------------------- المشاريع وملفاتها
+@app.template_filter("filesize")
+def filesize(n):
+    n = n or 0
+    for unit in ("بايت", "KB", "MB"):
+        if n < 1024 or unit == "MB":
+            return f"{n:.0f} {unit}" if unit == "بايت" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def get_project(pid):
+    p = q("""SELECT p.*, u.full_name who FROM projects p LEFT JOIN users u ON u.id=p.created_by
+             WHERE p.id=?""", (pid,), one=True)
+    if not p:
+        abort(404)
+    return p
+
+
+def can_manage_project(u, p):
+    return has_role(u, "manager") or p["created_by"] == u["id"]
+
+
+def clean_relpath(name):
+    """يحافظ على مسار المجلد الفرعي عند رفع مجلد كامل، ويمنع أي مسار خطِر."""
+    parts = [s.strip() for s in (name or "").replace("\\", "/").split("/")]
+    parts = [s for s in parts if s and s not in (".", "..")]
+    return "/".join(parts)[-200:]
+
+
+@app.route("/projects", methods=["GET", "POST"])
+@login_required()
+def projects():
+    u = current_user()
+    if request.method == "POST":
+        if not has_role(u, "manager"):
+            abort(403)
+        f = request.form
+        name = f.get("name", "").strip()[:150]
+        if not name:
+            flash("اسم المشروع مطلوب.", "error")
+            return redirect(url_for("projects"))
+        pid = ex("INSERT INTO projects(name,description,client,status,created_by,created_at) VALUES(?,?,?,?,?,?)",
+                 (name, f.get("description", "").strip()[:2000], f.get("client", "").strip()[:150],
+                  "active", u["id"], now()))
+        log(f"إنشاء مشروع #{pid} {name}")
+        flash("تم إنشاء المشروع، يمكنك الآن رفع ملفاته.", "ok")
+        return redirect(url_for("project_view", pid=pid))
+    text, st = request.args.get("q", "").strip(), request.args.get("status", "")
+    where, args = [], []
+    if text:
+        where.append("(p.name LIKE ? OR p.client LIKE ? OR p.description LIKE ?)")
+        args += [f"%{text}%"] * 3
+    if st in PROJECT_STATUS:
+        where.append("p.status=?")
+        args.append(st)
+    rows = q(f"""SELECT p.id, p.name, p.client, p.status, p.created_at, u.full_name who,
+                 COUNT(f.id) n, COALESCE(SUM(f.size),0) sz
+                 FROM projects p LEFT JOIN users u ON u.id=p.created_by
+                 LEFT JOIN project_files f ON f.project_id=p.id
+                 {"WHERE " + " AND ".join(where) if where else ""}
+                 GROUP BY p.id, p.name, p.client, p.status, p.created_at, u.full_name
+                 ORDER BY p.id DESC""", args)
+    return render_template("projects.html", rows=rows, text=text, st=st, can_create=has_role(u, "manager"),
+                           PROJECT_STATUS=PROJECT_STATUS, PROJECT_STATUS_COLOR=PROJECT_STATUS_COLOR)
+
+
+@app.route("/projects/<int:pid>")
+@login_required()
+def project_view(pid):
+    u = current_user()
+    p = get_project(pid)
+    files = q("""SELECT f.*, u.full_name who FROM project_files f LEFT JOIN users u ON u.id=f.uploaded_by
+                 WHERE f.project_id=? ORDER BY f.original_name""", (pid,))
+    return render_template("project_view.html", p=p, files=files, can_manage=can_manage_project(u, p),
+                           total=sum(f["size"] or 0 for f in files), limit_mb=UPLOAD_LIMIT_MB,
+                           exts=", ".join(sorted(PROJECT_EXT)), PROJECT_STATUS=PROJECT_STATUS,
+                           PROJECT_STATUS_COLOR=PROJECT_STATUS_COLOR)
+
+
+@app.post("/projects/<int:pid>/edit")
+@login_required()
+def project_edit(pid):
+    u = current_user()
+    p = get_project(pid)
+    if not can_manage_project(u, p):
+        abort(403)
+    f = request.form
+    name, st = f.get("name", "").strip()[:150], f.get("status", "")
+    if not name or st not in PROJECT_STATUS:
+        flash("اسم المشروع وحالته مطلوبان.", "error")
+    else:
+        ex("UPDATE projects SET name=?, client=?, description=?, status=? WHERE id=?",
+           (name, f.get("client", "").strip()[:150], f.get("description", "").strip()[:2000], st, pid))
+        log(f"تعديل مشروع #{pid}")
+        flash("تم حفظ بيانات المشروع.", "ok")
+    return redirect(url_for("project_view", pid=pid))
+
+
+@app.post("/projects/<int:pid>/upload")
+@login_required()
+def project_upload(pid):
+    u = current_user()
+    get_project(pid)
+    is_fetch = request.headers.get("X-Requested-With") == "fetch"
+    files = [x for x in request.files.getlist("files") if x and x.filename]
+    paths = request.form.getlist("relpath")
+    saved, errors = 0, []
+    for i, file in enumerate(files):
+        name = clean_relpath(paths[i] if i < len(paths) and paths[i] else file.filename)
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if not name or ext not in PROJECT_EXT:
+            errors.append(f"{name or 'ملف'}: نوع غير مسموح")
+            continue
+        data = file.read()
+        if not data:
+            errors.append(f"{name}: الملف فارغ")
+            continue
+        stored = f"projects/{pid}/{uuid.uuid4().hex}.{ext}"
+        put_file(stored, data)
+        ex("""INSERT INTO project_files(project_id,stored_name,original_name,size,uploaded_by,uploaded_at)
+              VALUES(?,?,?,?,?,?)""", (pid, stored, name, len(data), u["id"], now()))
+        saved += 1
+    if saved:
+        log(f"رفع {saved} ملف إلى المشروع #{pid}")
+    if is_fetch:
+        if not files:
+            return jsonify(ok=False, error="لم يتم اختيار ملف"), 400
+        return jsonify(ok=saved > 0, saved=saved, error="، ".join(errors)), (200 if saved else 400)
+    if saved:
+        flash(f"تم رفع {saved} ملف.", "ok")
+    if errors or not files:
+        flash("، ".join(errors) or "لم يتم اختيار ملف.", "error")
+    return redirect(url_for("project_view", pid=pid))
+
+
+def get_project_file(pid, fid):
+    f = q("SELECT * FROM project_files WHERE id=? AND project_id=?", (fid, pid), one=True)
+    if not f:
+        abort(404)
+    return f
+
+
+@app.route("/projects/<int:pid>/files/<int:fid>")
+@login_required()
+def project_file(pid, fid):
+    f = get_project_file(pid, fid)
+    data = get_file(f["stored_name"])
+    if data is None:
+        abort(404)
+    return send_file(io.BytesIO(data), as_attachment=True,
+                     download_name=f["original_name"].rsplit("/", 1)[-1],
+                     mimetype=mimetypes.guess_type(f["original_name"])[0] or "application/octet-stream")
+
+
+@app.post("/projects/<int:pid>/files/<int:fid>/delete")
+@login_required()
+def project_file_delete(pid, fid):
+    u = current_user()
+    p, f = get_project(pid), get_project_file(pid, fid)
+    if not (can_manage_project(u, p) or f["uploaded_by"] == u["id"]):
+        abort(403)
+    del_file(f["stored_name"])
+    ex("DELETE FROM project_files WHERE id=?", (fid,))
+    log(f"حذف ملف {f['original_name']} من المشروع #{pid}")
+    flash("تم حذف الملف.", "ok")
+    return redirect(url_for("project_view", pid=pid))
+
+
+@app.post("/projects/<int:pid>/delete")
+@login_required(())
+def project_delete(pid):
+    if not has_role(current_user(), "admin"):
+        abort(403)
+    p = get_project(pid)
+    for f in q("SELECT stored_name FROM project_files WHERE project_id=?", (pid,)):
+        del_file(f["stored_name"])
+    ex("DELETE FROM project_files WHERE project_id=?", (pid,))
+    ex("DELETE FROM projects WHERE id=?", (pid,))
+    log(f"حذف المشروع #{pid} {p['name']}")
+    flash("تم حذف المشروع وكل ملفاته.", "ok")
+    return redirect(url_for("projects"))
 
 
 # ----------------------------------------------------------------- المحاسبة المبسطة
@@ -1423,7 +1632,8 @@ def backup():
     if not has_role(current_user(), "admin"):
         abort(403)
     if USE_PG:
-        tables = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA)
+        tables = [t for t in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA + EXTRA_SCHEMA)
+                  if t not in ("files", "settings")]
         dump = {t: [dict(zip(r.keys(), r)) for r in q(f"SELECT * FROM {t} ORDER BY id")] for t in tables}
         dump["files"] = [dict(name=r["name"], created_at=r["created_at"])
                          for r in q("SELECT name, created_at FROM files ORDER BY id")]

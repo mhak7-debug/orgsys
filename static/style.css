@@ -80,3 +80,9 @@ canvas#pad{touch-action:none;width:100%;max-width:520px;height:auto;border:1px d
 @media(max-width:900px){.layout{flex-direction:column}.sidebar{width:auto;height:auto;position:static;display:flex;gap:4px;overflow-x:auto;padding:8px}
 .side-title{display:none}.side-item{white-space:nowrap}.cols{grid-template-columns:1fr}.page{padding:14px}.navbar form.search{display:none}}
 @media print{.navbar,.sidebar,.noprint{display:none!important}body{background:#fff}.card{border:0;padding:0}.page{padding:0}}
+.dropzone{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;border:2px dashed #cfd4da;border-radius:10px;padding:22px 14px;background:#fafbfc;cursor:pointer;color:var(--text);font-size:14px;margin:0}
+.dropzone:hover,.dropzone:focus-within{border-color:var(--accent);background:var(--blue-bg)}
+.dropzone input[type=file]{margin-top:8px;max-width:340px;background:#fff}
+.up-list{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.up-list li{padding:4px 10px;border-radius:6px;background:var(--gray-bg)}
+.up-list li.ok{background:var(--green-bg);color:var(--green)}.up-list li.err{background:var(--red-bg);color:var(--red)}
